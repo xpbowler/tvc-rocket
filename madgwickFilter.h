@@ -67,9 +67,6 @@ static inline struct quaternion quat_conjugate(struct quaternion q){
     return q;
 }
 
-// norm of a quaternion is the same as a complex number
-// sqrt( q1^2 + q2^2 + q3^2 + q4^2)
-// the norm is also the sqrt(q * conjugate(q)), but thats a lot of operations in the quaternion multiplication
 static inline float quat_Norm (struct quaternion q)
 {
     return sqrt(q.q1*q.q1 + q.q2*q.q2 + q.q3*q.q3 +q.q4*q.q4);
@@ -91,12 +88,6 @@ static inline void printQuaternion (struct quaternion q){
 
 // IMU consists of a Gyroscope plus Accelerometer sensor fusion
 void imu_filter(float ax, float ay, float az, float gx, float gy, float gz);
-
-// void marg_filter(void); for future
-
-
 void eulerAngles(struct quaternion q, float* roll, float* pitch, float* yaw);
 
-
-
-#endif /* MADGWICK_FILTER_H */
+#endif 
