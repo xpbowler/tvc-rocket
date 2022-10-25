@@ -1,36 +1,79 @@
 #include <stdio.h>
 #include "madgwickFilter.h"
 #include "madgwick.c"
-
-#define MPU6050_ADDRESS  0b1101000
-#define HMC5883L_ADDRESS 0b0011110
-#define MS5611_ADDRESS   0b1110111
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_BMP280.h> 
+#include <SPIFlash.h>
+#include <Servo.h>
+#include "I2Cdev.h"
+#include <Adafruit_ISM330DHCX.h>
 
 //global variables
-float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude;
+float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude,temperature;
 int pflight;
+int R_LED = 38;
+int G_LED = 34;
+int B_LED = 35;
+int Buzzer = 28;
+int Pyro1 = 22;
+int Pyro2 = 2;
+int Pyro3 = 29;
+int Pyro4 = 37;
+int TVCXpin = 9;
+int TVCYpin = 15;
+Servo TVCXservo;
+Servo TVCYservo;
+Adafruit_BMP280 bmp;
+Adafruit_ISM330DHCX imu;
+int16_t ax, ay, az;
+int16_t gx, gy, gz;
+#define OUTPUT_READABLE_IMU
+
+#define CHIPSIZE MB64
+SPIFlash flash(1);
+uint8_t pageBuffer[256];
+String serialCommand;
+char printBuffer[128];
+uint16_t page;
+uint8_t offset, dataByte;
+uint16_t dataInt;
+String inputString, outputString;
 
 void setup() {
-    // setup code, to run once:
-
-    // configure i2c
-    i2c_setup(I2C1, FAST_MODE_400KHZ, PB8, PB9);
-    // configure the MPU6050 (gyro/accelerometer)
-    i2c_write_register(I2C1, MPU6050_ADDRESS,  0x6B, 0x00);                    // exit sleep
-	i2c_write_register(I2C1, MPU6050_ADDRESS,  0x19, 109);                     // sample rate = 8kHz / 110 = 72.7Hz
-	i2c_write_register(I2C1, MPU6050_ADDRESS,  0x1B, 0x18);                    // gyro full scale = +/- 2000dps
-	i2c_write_register(I2C1, MPU6050_ADDRESS,  0x1C, 0x08);                    // accelerometer full scale = +/- 4g
-	i2c_write_register(I2C1, MPU6050_ADDRESS,  0x38, 0x01);                    // enable INTA interrupt
-    
-    // configure an external interrupt for the MPU6050's active-high INTA signal
-	gpio_setup(PB7, INPUT, PUSH_PULL, FIFTY_MHZ, NO_PULL, AF0);
-	exti_setup(PB7, RISING_EDGE);
+  // setup code
+  serial.begin(115200);
+  pinMode(R_LED, OUTPUT);
+  pinMode(G_LED, OUTPUT);
+  pinMode(B_LED, OUTPUT);
+  pinMode(Pyro1, OUTPUT);
+  pinMode(Pyro2, OUTPUT);
+  pinMode(Pyro3, OUTPUT);
+  pinMode(Pyro4, OUTPUT);
+  if(!bmp.begin()){
+    //barometer configuration
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+  }
+  //IMU configuration
+  imu.initialize();
+  imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G); //set accel range (in gs)
+  imu.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); //set gryo range (in degrees/s)
+  imu.setAccelDataRate(LSM6DS_RATE_12_5_HZ); 
+  imu.setGyroDataRate(LSM6DS_RATE_12_5_HZ); 
+  imu.configInt1(false, false, true); // accelerometer DRDY on INT1 (dont know what these lines do)
+  imu.configInt2(false, true, false); // gyro DRDY on INT2
+  //TVC servos
+  TVCXservo.attach(TVCXpin);
+  TVCYservo.attach(TVCYpin);
 }
-
 void loop() {
   // main code, to run repeatedly:
-  update_orientation();
-  if (az >= 6){
+  update_sensors();
+  if (ax_g >= 6){
      pflight = 1;
   }
   if (pflight == 1){
@@ -42,29 +85,23 @@ void tvc(){
     
 
 }
-void update_orientation(void){
-    //update sensor values
-    uint8_t rx_buffer[20];
-	i2c_read_registers(I2C1, MPU6050_ADDRESS, 20, 0x3B, rx_buffer);
-    int ax = rx_buffer[0];
-    int ay = rx_buffer[2];
-    int az = rx_buffer[4];
-    int gx = rx_buffer[6];
-    int gy = rx_buffer[8];
-    int gz = rx_buffer[10];
-
-    // convert accelerometer readings into G's
-	ax_g = ax / 8192.0f;
-	ay_g = ay / 8192.0f;
-	az_g = az / 8192.0f;
-    //convert gyroscope readings into rad/s
-    gx_rad = gx / 939.650784f;
-	gy_rad = gy / 939.650784f;
-	gz_rad = gz / 939.650784f;
-
-
-    //madgwick filter 
-    float roll=0.0, pitch=0.0, yaw=0.0;
-    madgwick_update(ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad);
-    eulerAngles(q_est,&roll,&pitch,&yaw);
+void update_sensors(void){
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t temp;
+  imu.getEvent(&accel, &gyro, &temp);
+  //update sensor values
+  gx_rad = gyro.gyro.x;
+  gy_rad = gyro.gyro.y;   //in rad/s
+  gz_rad = gyro.gyro.z;
+  ax_g = accel.acceleration.x / 9.81;
+  ay_g = accel.acceleration.y / 9.81;   //in gs, or is m/s^2 fine?
+  az_g = accel.acceleration.z / 9.81; 
+  temperature = temp.temperature;
+  pressure = bmp.readPressure();    //in Pa
+  altitude = bmp.readAltitude(1013.25); //needs to be adjusted to local forecast. in meters
+  //madgwick filter 
+  float roll=0.0, pitch=0.0, yaw=0.0;
+  madgwick_update(ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad);
+  eulerAngles(q_est,&roll,&pitch,&yaw);
 }
