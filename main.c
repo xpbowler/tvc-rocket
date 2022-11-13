@@ -1,18 +1,12 @@
-#include <Wire.h>
-#include <Servo.h>
-#include "I2Cdev.h"
-#include <BMP388_DEV.h>
-#include <Adafruit_ISM330DHCX.h>
-#include <SPI.h>
-#include <SP.h>
 #include <math.h>
 #include <stdio.h>
-#define SEALEVELPRESSURE_HPA (1013.25)
-
-//Useful functions
-//tone(output pin, tone, duration)
-//servo.write(theta). theta is degrees. make sure also to add delay(500) or something after
-//digitalWrite(ledpin,(LOW or HIGH)). low is off. high is on.
+#include "I2Cdev.h"
+#include <SPI.h>
+#include <SP.h>
+#include <Wire.h>
+#include <Servo.h>
+#include <BMP388_DEV.h>
+#include <Adafruit_ISM330DHCX.h>
 
 //global variables
 float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude,temperature;
@@ -43,10 +37,9 @@ int B_LED = 14;
 int Buzzer = 36;
 
 void setup() {
-  // setup code
   serial.begin(115200);
   //Wire.begin();
-  //Wire.setClock(400000UL);
+  //Wire.setClock(400000UL); . dont know if needed
 
   //SD read/write
   SD.begin(BUILTIN_SDCARD);
@@ -71,7 +64,7 @@ void setup() {
   imu.configInt1(false, false, true); // accelerometer DRDY on INT1 (dont know what these lines do)
   imu.configInt2(false, true, false); // gyro DRDY on INT2
 
-  //TVC servos
+  //servos
   TVCX.attach(TVCXpin);
   TVCY.attach(TVCYpin);
   Parachute.attach(Parachutepin);
@@ -81,10 +74,9 @@ void setup() {
 
 double elapsed_parachute = 0;
 void loop() {
-  // main code, to run repeatedly:
   prevTime = currentTime;
   currentTime = millis();
-  sampletime = (currentTime - prevTime)/1000; //in seconds
+  sampletime = (currentTime - prevTime)/1000; //in seconds. currentTime and prevTime are in milliseconds. 
 
   update_sensors();
   launchdetect();
@@ -151,7 +143,7 @@ void land_detect(){
     flight_data.close();
     TVCX.write(sx_start);
     TVCY.write(sy_start);
-    //add whatever else we wan     t to do after the rocket lands here
+    //add whatever else we want to do after the rocket lands here
     exit(0); //does this end the program?
   }
 }
@@ -305,7 +297,7 @@ float PI = 3.14159265358979f;
 float GYRO_MEAN_ERROR = PI * (5.0f / 180.0f); // 5 deg/s gyroscope measurement error (in rad/s)  *from paper*
 float BETA = sqrt(3.0f/4.0f) * GYRO_MEAN_ERROR;    //*from paper*
 
-/*struct quaternion{
+/*struct quaternion{  <-- dont know if this is needed.
   float q1;
   float q2;
   float q3;
