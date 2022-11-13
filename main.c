@@ -16,6 +16,7 @@
 
 //global variables
 float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude,temperature;
+float prev_altitude;
 float roll=0.0, pitch=0.0, yaw=0.0;
 float orientation[2] = {pitch,yaw};
 struct quaternion q_est = { 1, 0, 0, 0};       // initialize with as unit vector with real component  = 1
@@ -49,6 +50,7 @@ void setup() {
 
   //SD read/write
   SD.begin(BUILTIN_SDCARD);
+  flight_data = SD.open("flight_data.txt");
 
   //led
   pinMode(R_LED, OUTPUT);
@@ -77,6 +79,7 @@ void setup() {
   startup();
 }
 
+double elapsed_parachute = 0;
 void loop() {
   // main code, to run repeatedly:
   prevTime = currentTime;
@@ -86,7 +89,10 @@ void loop() {
   update_sensors();
   launchdetect();
   datastore();
-  if (az_g<5){
+  if (az_g<5 & (prev_altitude - altitude)>0){
+    elapsed_parachute += sampletime;
+  }
+  if(elapsed_parachute > 0.4){
     delay(4000);
     Parachute.write(90);
     state = 2;
@@ -123,8 +129,12 @@ void servo_actuation(correction_angle){
   //dont rlly know about this shit 
 }
 
+double elapsed_launch = 0;
 void launchdetect(){
   if(az_g >= 5){
+    elapsed_launch += sampletime;
+  }
+  if(elapsed_launch > 0.4){
     state = 1;
   }
   if(state ==1){
@@ -132,17 +142,21 @@ void launchdetect(){
   }
 }
 
-double initial_land;
-double final_land;
+double elapsed_land = 0;
 void land_detect(){
   if(ax_g<0.5 & altitude<2){
-    initial_land = currentTime;
-    final_land = currentTime;
+    elapsed_land += sampletime;
+  }
+  if(elapsed_land>=6){
+    flight_data.close();
+    TVCX.write(sx_start);
+    TVCY.write(sy_start);
+    //add whatever else we wan     t to do after the rocket lands here
+    exit(0); //does this end the program?
   }
 }
 
 void datastore(){
-  flight_data = SD.open("flight_data.txt");
   flight_data.println(currentTime+" "+roll+" "+yaw+" "+pitch+" "+temperature
   +" "+altitude+" "+pressure+" "+ax_g+" "+ay_g+" "+az_g+" "+gx_rad+" "+state);
 }
@@ -188,6 +202,7 @@ void update_sensors(void){
   sensors_event_t accel;
   sensors_event_t gyro;
   //update sensor values
+  prev_altitude = altitude;
   bmp.getMeasurements(temperature,pressure,altitude);    //in C,hPa,m
   imu.getEvent(&accel, &gyro); 
   gx_rad = gyro.gyro.x;
