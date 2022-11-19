@@ -1,27 +1,31 @@
 #include <math.h>
 #include <stdio.h>
-#include "I2Cdev.h"
 #include <SPI.h>
-#include <SP.h>
+#include <SD.h>
 #include <Wire.h>
 #include <Servo.h>
-#include <BMP388_DEV.h>
+#include <Adafruit_Sensor.h>
+#include "Adafruit_BMP3XX.h"
 #include <Adafruit_ISM330DHCX.h>
+#include "madgwickfilter.h"
+
 
 //global variables
 float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude,temperature;
 float prev_altitude;
 float roll=0.0, pitch=0.0, yaw=0.0;
-float orientation[2] = {pitch,yaw};
+float orientationx = pitch;
+float orientationy = yaw;
 struct quaternion q_est = { 1, 0, 0, 0};       // initialize with as unit vector with real component  = 1
-double currentTime, prevTime, dt;
-int sampletime;
+float currentTime, prevTime, dt;
+float sampletime;
 File flight_data;
+int SEALEVELPRESSURE_HPA = 1013.25;
 
-int ax, ay, az;
-int gx, gy, gz;
-BMP388_DEV bmp;
-Adafruit_ISM330DHCX imu;
+float ax, ay, az;
+float gx, gy, gz;
+Adafruit_BMP3XX bmp;
+Adafruit_ISM330DHCX ism330dhcx;
 
 int TVCXpin = 33;
 int TVCYpin = 29;
@@ -35,15 +39,17 @@ int R_LED = 37;
 int G_LED = 13;
 int B_LED = 14;
 int Buzzer = 36;
+int sx_start = 80; //tbd
+int sy_start = 80; //tbd
 
-void setup() {
-  serial.begin(115200);
+void setup(void) {
+  Serial.begin(115200);
   //Wire.begin();
   //Wire.setClock(400000UL); . dont know if needed
 
   //SD read/write
   SD.begin(BUILTIN_SDCARD);
-  flight_data = SD.open("flight_data.txt");
+  flight_data = SD.open("flight_data.csv");
 
   //led
   pinMode(R_LED, OUTPUT);
@@ -51,25 +57,25 @@ void setup() {
   pinMode(B_LED, OUTPUT);
 
   //barometer
-  bmp388.begin(SLEEP_MODE, OVERSAMPLING_X16, OVERSAMPLING_X2, IIR_FILTER_4, TIME_STANDBY_5MS);
-  bmp388.startNormalConversion();
+  bmp.begin_I2C();
+  bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
+  bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
+  bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
+  bmp.setOutputDataRate(BMP3_ODR_50_HZ);
 
   //imu
   ism330dhcx.begin_I2C();
-  imu.initialize();
-  imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G); //set accel range (in gs)
-  imu.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); //set gryo range (in degrees/s)
-  imu.setAccelDataRate(LSM6DS_RATE_12_5_HZ); 
-  imu.setGyroDataRate(LSM6DS_RATE_12_5_HZ); 
-  imu.configInt1(false, false, true); // accelerometer DRDY on INT1 (dont know what these lines do)
-  imu.configInt2(false, true, false); // gyro DRDY on INT2
+  ism330dhcx.setAccelRange(LSM6DS_ACCEL_RANGE_4_G); //set accel range (in gs)
+  ism330dhcx.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); //set gryo range (in degrees/s)
+  ism330dhcx.setAccelDataRate(LSM6DS_RATE_12_5_HZ); 
+  ism330dhcx.setGyroDataRate(LSM6DS_RATE_12_5_HZ); 
+  ism330dhcx.configInt1(false, false, true); // accelerometer DRDY on INT1 (dont know what these lines do)
+  ism330dhcx.configInt2(false, true, false); // gyro DRDY on INT2
 
   //servos
   TVCX.attach(TVCXpin);
   TVCY.attach(TVCYpin);
   Parachute.attach(Parachutepin);
-
-  startup();
 }
 
 double elapsed_parachute = 0;
@@ -81,6 +87,7 @@ void loop() {
   update_sensors();
   launchdetect();
   datastore();
+  Serial.println((String)roll+" "+pitch+" "+yaw);
   if (az_g<5 & (prev_altitude - altitude)>0){
     elapsed_parachute += sampletime;
   }
@@ -97,28 +104,36 @@ void loop() {
 float kp = 3.55;  //kp,kd,ki need to be tuned for optimal PID control
 float kd = 2.05;
 float ki = 2.05;
-double divisor;
-float setpoint[2] = {0,0};
-double errSum[2] = {0,0};
-float lastErr[2] = {0,0};
-double correction_angle[2]; 
+float divisor;
+float setpointx = 0;
+float setpointy = 0;
+float errSumx = 0;
+float errSumy = 0;
+float lastErrx = 0;
+float lastErry = 0;
+float correction_anglex = 0;
+float correction_angley = 0;
+float pwmx = 0;  //x is first, y is second
+float pwmy = 0;
+float servo_gear_ratio = 5.8; //change according to our servo
+float servo_offsetx = 100;
+float servo_offsety = 100;
 void pid(){
-  float error[2] = orientation - setpoint;
-  errSum += error * sampletime;
-  double dErr[2] = (error - lastErr)/sampletime;
-  correction_angle = (kp*error + ki*errSum + kd*dErr)/divisor;
-  lastErr = error;
-  servo_actuation(correction_angle);
-}
-
-double pwm[2] = {0,0};  //x is first, y is second
-double servo_gear_ratio = 5.8; //change according to our servo
-double servo_offset[2] = {100,100}; //change according to our servo
-void servo_actuation(correction_angle){
-  pwm = ((correction_angle * servo_gear_ratio) + servo_offset);
-  TVCX.write(pwm[1]);
-  TVCY.write(pwm[2]);
-  //dont rlly know about this shit 
+  float errorx = orientationx - setpointx;
+  errSumx += errorx * sampletime;
+  float dErrx = (errorx - lastErrx)/sampletime;
+  correction_anglex = (kp*errorx + ki*errSumx + kd*dErrx)/divisor;
+  lastErrx = errorx;
+  
+  float errory = orientationy - setpointy;
+  errSumy += errory * sampletime;
+  float dErry = (errory - lastErry)/sampletime;
+  correction_angley = (kp*errory + ki*errSumy + kd*dErry)/divisor;
+  lastErry = errory;
+  pwmx = ((correction_anglex * servo_gear_ratio) + servo_offsetx);
+  pwmy = ((correction_angley * servo_gear_ratio) + servo_offsety);
+  TVCX.write(pwmx);
+  TVCY.write(pwmy);
 }
 
 double elapsed_launch = 0;
@@ -149,60 +164,25 @@ void land_detect(){
 }
 
 void datastore(){
-  flight_data.println(currentTime+" "+roll+" "+yaw+" "+pitch+" "+temperature
-  +" "+altitude+" "+pressure+" "+ax_g+" "+ay_g+" "+az_g+" "+gx_rad+" "+state);
+  flight_data.println((String)gx_rad+" "+gy_rad+" "+gz_rad+" "+ax_g+" "+ay_g+" "+az_g+" "+gx_rad);
 }
-
-int sx_start = 80; //tbd
-int sy_start = 80; //tbd
-void startup () {
-  digitalWrite(G_LED, HIGH);
-  TVCX.write(sx_start);
-  TVCY.write(sy_start);
-  delay(1000);
-  digitalWrite(G_LED, LOW);
-  digitalWrite(Buzzer, HIGH);
-  digitalWrite(R_LED, HIGH);
-  TVCX.write(sx_start + 20);
-  delay(200);
-  digitalWrite(Buzzer, LOW);
-  TVCY.write(sy_start + 20);
-  delay(200);
-  digitalWrite(R_LED, LOW);
-  digitalWrite(Buzzer, HIGH);
-  digitalWrite(B_LED, HIGH);
-  TVCX.write(sx_start);
-  delay(200);
-  digitalWrite(Buzzer, LOW);
-  TVCY.write(sy_start);
-  delay(200);
-  digitalWrite(B_LED, LOW);
-  digitalWrite(Buzzer, HIGH);
-  digitalWrite(G_LED, HIGH);
-  TVCX.write(sx_start - 20);
-  delay(200);
-  digitalWrite(Buzzer, LOW);
-  TVCY.write(sy_start - 20);
-  delay(200);
-  TVCX.write(sx_start);
-  delay(200);
-  TVCY.write(sy_start);
-  delay(500);
- }
 
 void update_sensors(void){
   sensors_event_t accel;
   sensors_event_t gyro;
+  sensors_event_t temp;
   //update sensor values
   prev_altitude = altitude;
-  bmp.getMeasurements(temperature,pressure,altitude);    //in C,hPa,m
-  imu.getEvent(&accel, &gyro); 
+  temperature = bmp.temperature;
+  pressure = bmp.pressure;
+  altitude = bmp.readAltitude(SEALEVELPRESSURE_HPA); //in C,hpa,m
+  ism330dhcx.getEvent(&accel, &gyro, &temp); 
   gx_rad = gyro.gyro.x;
   gy_rad = gyro.gyro.y;   //in rad/s
   gz_rad = gyro.gyro.z;
-  ax_g = accel.acceleration.x / 9.81;
-  ay_g = accel.acceleration.y / 9.81;   //in gs, or is m/s^2 fine?
-  az_g = accel.acceleration.z / 9.81; 
+  ax_g = accel.acceleration.x; 
+  ay_g = accel.acceleration.y;    //in gs, or is m/s^2 fine?
+  az_g = accel.acceleration.z; 
   //madgwick filter 
   madgwick_update(ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad);
   eulerAngles(q_est,&roll,&pitch,&yaw);
@@ -289,68 +269,4 @@ void eulerAngles(struct quaternion q, float* roll, float* pitch, float* yaw){
     *pitch *= (180.0f / PI);
     *roll *= (180.0f / PI);
 
-}
-
-// Include a hardware specific header file to redefine these predetermined values
-float DELTA_T = 0.01f; // 100Hz sampling frequency
-float PI = 3.14159265358979f;
-float GYRO_MEAN_ERROR = PI * (5.0f / 180.0f); // 5 deg/s gyroscope measurement error (in rad/s)  *from paper*
-float BETA = sqrt(3.0f/4.0f) * GYRO_MEAN_ERROR;    //*from paper*
-
-/*struct quaternion{  <-- dont know if this is needed.
-  float q1;
-  float q2;
-  float q3;
-  float q4;
-};
-*/
-
-// Multiply a reference of a quaternion by a scalar, q = s*q
-void quat_scalar(struct quaternion * q, float scalar){
-  q -> q1 *= scalar;
-  q -> q2 *= scalar;
-  q -> q3 *= scalar;
-  q -> q4 *= scalar;
-}
-
-// Adds two quaternions together and the sum is the pointer to another quaternion, Sum = L + R
-void quat_add(struct quaternion * Sum, struct quaternion L, struct quaternion R){
-  Sum -> q1 = L.q1 + R.q1;
-  Sum -> q2 = L.q2 + R.q2;
-  Sum -> q3 = L.q3 + R.q3;
-  Sum -> q4 = L.q4 + R.q4;
-}
-
-// Subtracts two quaternions together and the sum is the pointer to another quaternion, sum = L - R
-void quat_sub(struct quaternion * Sum, struct quaternion L, struct quaternion R){
-  Sum -> q1 = L.q1 - R.q1;
-  Sum -> q2 = L.q2 - R.q2;
-  Sum -> q3 = L.q3 - R.q3;
-  Sum -> q4 = L.q4 - R.q4;
-}
-
-// the conjugate of a quaternion is it's imaginary component sign changed  q* = [s, -v] if q = [s, v]
-struct quaternion quat_conjugate(struct quaternion q){
-  q.q2 = -q.q2;
-  q.q3 = -q.q3;
-  q.q4 = -q.q4;
-  return q;
-}
-
-float quat_Norm (struct quaternion q)
-{
-  return sqrt(q.q1*q.q1 + q.q2*q.q2 + q.q3*q.q3 +q.q4*q.q4);
-}
-
-// Normalizes pointer q by calling quat_Norm(q),
-void quat_Normalization(struct quaternion * q){
-  float norm = quat_Norm(*q);
-  q -> q1 /= norm;
-  q -> q2 /= norm;
-  q -> q3 /= norm;
-  q -> q4 /= norm;
-}
-
-void printQuaternion (struct quaternion q){
-  printf("%f %f %f %f\n", q.q1, q.q2, q.q3, q.q4);
 }
