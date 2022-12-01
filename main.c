@@ -68,49 +68,43 @@ void setup(void) {
   Parachute.attach(Parachutepin);
 }
 
-double elapsed_parachute = 0;
 void loop() {
-  prevTime = currentTime;
-  currentTime = millis();
-  sampletime = (currentTime - prevTime)/1000; //in seconds. currentTime and prevTime are in milliseconds. 
   update_sensors();
-  pid();
   datastore();
+  pid();
   Serial.println((String)yaw+" "+pitch+" "+pwmx+" "+pwmy);
   //Serial.println((String)az_g+" "+ay_g+" "+ax_g+" "+g_roll+" "+g_yaw+" "+g_pitch);
 }
 
-float kp = 3.55;  //kp,kd,ki need to be tuned for optimal PID control
+//tuneable values
+float kp = 3.55;  
 float kd = 2.05;
-float ki = 2.05;
-float divisor = 2;
+//float ki = 2.05;
+float servo_offsetx = 90;
+float servo_offsety = 90;
+float ratiox = 2;
+float ratioy = 2;
+
 float setpointx = 0;
 float setpointy = 0;
-float errSumx = 0;
-float errSumy = 0;
 float lastErrx = 0;
 float lastErry = 0;
-float correction_anglex = 0;
-float correction_angley = 0;
-float servo_gear_ratio = 5.8; //change according to our servo
-float servo_offsetx = 0;
-float servo_offsety = 0;
+float PIDX = 0;
+float PIDY = 0;
 void pid(){
-  float orientationx = pitch;
-  float orientationy = yaw;
-  float errorx = orientationx;
-  errSumx += errorx * sampletime;
-  float dErrx = (errorx - lastErrx)/0.0384615;
-  correction_anglex = (kp*errorx + kd*dErrx)/divisor;
   lastErrx = errorx;
-  
-  float errory = orientationy;
-  errSumy += errory * sampletime;
-  float dErry = (errory - lastErry)/0.0384615;
-  correction_angley = (kp*errory + kd*dErry)/divisor;
   lastErry = errory;
-  pwmx = ((correction_anglex * servo_gear_ratio) + servo_offsetx);
-  pwmy = ((correction_angley * servo_gear_ratio) + servo_offsety);
+  float errorx = pitch-setpointx;
+  float errory = yaw-setpointy; 
+  
+  float dErrx = (errorx - lastErrx)/sampletime;
+  PIDX = kp*errorx+kd*dErrx;
+  
+  float dErry = (errory - lastErry)/sampletime;
+  PIDY = kp*errory+kd*dErry;
+
+  pwmx = servo_offsetx + PIDX*ratiox; //can be plus or minus depending on whether which side is 0 or 180
+  pwmy = servo_offsety + PIDY*ratioy;
   TVCX.write(pwmx);
   TVCY.write(pwmy);
 }
@@ -119,7 +113,7 @@ double elapsed_launch = 0;
 void launchdetect(){
   pid();
 }
-double elapsed_land = 0;
+/*double elapsed_land = 0;
 void land_detect(){
   if(ax_g<0.5 & altitude<2){
     elapsed_land += sampletime;
@@ -131,13 +125,16 @@ void land_detect(){
     //add whatever else we want to do after the rocket lands here
     exit(0); //does this end the program?
   }
-}
+}*/
 
 void datastore(){
   //flight_data.println((String)yaw+" "+pitch+" "+roll+" "+altitude+" "+pressure);
 }
 
 void update_sensors(void){
+  prevTime = currentTime;
+  currentTime = millis();
+  sampletime = (currentTime - prevTime)/1000; //in seconds. currentTime and prevTime are in milliseconds. 
   sensors_event_t accel;
   sensors_event_t gyro;
   sensors_event_t temp;
