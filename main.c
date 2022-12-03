@@ -15,7 +15,7 @@
 FusionAhrs ahrs;
 Adafruit_BMP3XX bmp;
 Adafruit_ISM330DHCX ism330dhcx;
-File flight_data;
+//File flight_data;
 float ax_g,ay_g,az_g,g_yaw,g_roll,g_pitch,pressure,altitude,temperature,prev_altitude,
 currentTime,prevTime,dt,sampletime;
 int SEALEVELPRESSURE_HPA = 1013.25;
@@ -31,6 +31,8 @@ Servo TVCX;
 Servo TVCY;
 Servo Parachute;
 int state = 0;
+float elapsed_launch=0;
+float elapsed_parachute=0;
 int R_LED = 37;
 int G_LED = 13;
 int B_LED = 14;
@@ -42,12 +44,8 @@ void setup(void) {
   FusionAhrsInitialise(&ahrs);
   Serial.begin(115200);
   //SD read/write
-  SD.begin(BUILTIN_SDCARD);
-  flight_data = SD.open("flight_data.csv");
-  //led
-  pinMode(R_LED, OUTPUT);
-  pinMode(G_LED, OUTPUT);
-  pinMode(B_LED, OUTPUT);
+  //SD.begin(BUILTIN_SDCARD);
+  //flight_data = SD.open("flight_data.csv");
   //barometer
   bmp.begin_I2C();
   bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
@@ -70,65 +68,61 @@ void setup(void) {
 
 void loop() {
   update_sensors();
-  datastore();
-  pid();
-  Serial.println((String)yaw+" "+pitch+" "+pwmx+" "+pwmy);
-  //Serial.println((String)az_g+" "+ay_g+" "+ax_g+" "+g_roll+" "+g_yaw+" "+g_pitch);
+  launchdetect();
+  if (az_g<0.8 & (prev_altitude - altitude)>0){
+    elapsed_parachute += sampletime;
+  }
+  if(elapsed_parachute > 0.3){
+    Parachute.write(180); //or 0, depending on the orientation of parachute ejection mechanism
+    state=2;
+  }
+  
+  //Serial.println((String)pitch+" "+yaw+" "+pwmy+" "+pwmx);
+  Serial.println((String)ax_g+" "+ay_g+" "+az_g+" "+state+" "+elapsed_launch+" "+elapsed_parachute);
+}
+
+void launchdetect(){
+  if(az_g >= 1.15){
+    elapsed_launch += sampletime;
+  }
+  if(elapsed_launch > 0.15){
+    state = 1;
+  }
+  if(state ==1){
+    pid();
+  }
 }
 
 //tuneable values
 float kp = 3.55;  
 float kd = 2.05;
 //float ki = 2.05;
+
+float ratiox = 1;
+float ratioy = 1;
 float servo_offsetx = 90;
 float servo_offsety = 90;
-float ratiox = 2;
-float ratioy = 2;
 
-float setpointx = 0;
-float setpointy = 0;
-float lastErrx = 0;
-float lastErry = 0;
-float PIDX = 0;
-float PIDY = 0;
+float setpointx=0;
+float setpointy=0;
+float errorx=0;
+float errory=0;
+float PIDX,PIDY,lastErrx,lastErry;
 void pid(){
   lastErrx = errorx;
   lastErry = errory;
-  float errorx = pitch-setpointx;
-  float errory = yaw-setpointy; 
+  errorx = pitch-setpointx;
+  errory = yaw-setpointy; 
   
   float dErrx = (errorx - lastErrx)/sampletime;
   PIDX = kp*errorx+kd*dErrx;
-  
   float dErry = (errory - lastErry)/sampletime;
   PIDY = kp*errory+kd*dErry;
-
+  
   pwmx = servo_offsetx + PIDX*ratiox; //can be plus or minus depending on whether which side is 0 or 180
   pwmy = servo_offsety + PIDY*ratioy;
   TVCX.write(pwmx);
   TVCY.write(pwmy);
-}
-
-double elapsed_launch = 0;
-void launchdetect(){
-  pid();
-}
-/*double elapsed_land = 0;
-void land_detect(){
-  if(ax_g<0.5 & altitude<2){
-    elapsed_land += sampletime;
-  }
-  if(elapsed_land>=6){
-    flight_data.close();
-    TVCX.write(sx_start);
-    TVCY.write(sy_start);
-    //add whatever else we want to do after the rocket lands here
-    exit(0); //does this end the program?
-  }
-}*/
-
-void datastore(){
-  //flight_data.println((String)yaw+" "+pitch+" "+roll+" "+altitude+" "+pressure);
 }
 
 void update_sensors(void){
@@ -145,24 +139,22 @@ void update_sensors(void){
   altitude = bmp.readAltitude(SEALEVELPRESSURE_HPA); //in C,hpa,m
   ism330dhcx.getEvent(&accel, &gyro, &temp); 
   g_roll = gyro.gyro.x;
-  g_pitch = gyro.gyro.y;   //in rad/s
+  g_pitch = gyro.gyro.y+0.05;   //in rad/s
   g_yaw = gyro.gyro.z;
   ax_g = accel.acceleration.z/9.81; 
   ay_g = accel.acceleration.y/9.81;    //in gs
   az_g = accel.acceleration.x/9.81; 
   //madgwick filter 
-  madgwick_update(ax_g,ay_g,az_g,g_roll,g_pitch,g_yaw);
+  madgwick_update(ax_g,ay_g,az_g,g_pitch,g_yaw,g_roll);
 }
 
-void madgwick_update(float ax, float ay, float az, float gx, float gz, float gy){
-  // Acquire latest sensor data
-  FusionVector gyroscope = {gx, gy, gz}; // replace this with actual gyroscope data in degrees/s
-  FusionVector accelerometer = {ax, ay, az}; // replace this with actual accelerometer data in g
-  // Update gyroscope AHRS algorithm
+void madgwick_update(float ax, float ay, float az, float gx, float gy, float gz){
+  FusionVector gyroscope = {gx, gy, gz}; 
+  FusionVector accelerometer = {ax, ay, az}; 
   FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer,0.0384615);
-  // Print algorithm outputs
+  
   const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
-  roll = euler.angle.roll;
+  yaw = euler.angle.roll;
   pitch = euler.angle.pitch;
-  yaw = euler.angle.yaw;
+  roll = euler.angle.yaw;
 }
