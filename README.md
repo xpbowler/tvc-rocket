@@ -7,7 +7,8 @@ The program has three main steps:
 * Live wireless flight data transmission to ground station
 
 ## Dependencies
-The software is to be run on a rocket flight computer, ideally with a Teensy 4.1 microcontroller: ```rocket_main3.0.ino```
+The software is to be run on a rocket flight computer: ```rocket_main3.0.ino```
+(ideally with a Teensy 4.1 microcontroller)
 
 Requirements: 
 * System: Arduino IDE (2.1.0)
