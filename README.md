@@ -9,6 +9,7 @@ The program has four main steps:
 
 ## Dependencies
 The software is to be run on a rocket flight computer: ```rocket_main3.0.ino```
+
 (ideally with a Teensy 4.1 microcontroller)
 
 Requirements: 
