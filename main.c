@@ -12,6 +12,7 @@
 
 
 //global variables
+<<<<<<< Updated upstream
 FusionAhrs ahrs;
 Adafruit_BMP3XX bmp;
 Adafruit_ISM330DHCX ism330dhcx;
@@ -64,6 +65,69 @@ void setup(void) {
   TVCX.attach(TVCXpin);
   TVCY.attach(TVCYpin);
   Parachute.attach(Parachutepin);
+=======
+float ax_g,ay_g,az_g,gx_rad,gy_rad,gz_rad,pressure,altitude,temperature;
+int pflight;
+int R_LED = 38;
+int G_LED = 34;
+int B_LED = 35;
+int Buzzer = 28;
+int Pyro1 = 22;
+int Pyro2 = 2;
+int Pyro3 = 29;
+int Pyro4 = 37;
+int TVCXpin = 9;
+int TVCYpin = 15;
+Servo TVCXservo;
+Servo TVCYservo;
+Servo parachute;
+Adafruit_BMP280 bmp;
+Adafruit_ISM330DHCX imu;
+int16_t ax, ay, az;
+int16_t gx, gy, gz;
+#define OUTPUT_READABLE_IMU
+
+#define CHIPSIZE MB64
+SPIFlash flash(1);
+uint8_t pageBuffer[256];
+String serialCommand;
+char printBuffer[128];
+uint16_t page;
+uint8_t offset, dataByte;
+uint16_t dataInt;
+String inputString, outputString;
+
+void setup() {
+  // setup code
+  serial.begin(115200);
+  pinMode(R_LED, OUTPUT);
+  pinMode(G_LED, OUTPUT);
+  pinMode(B_LED, OUTPUT);
+  pinMode(Pyro1, OUTPUT);
+  pinMode(Pyro2, OUTPUT);
+  pinMode(Pyro3, OUTPUT);
+  pinMode(Pyro4, OUTPUT);
+  if(!bmp.begin()){
+    //barometer configuration
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+  }
+  //IMU configuration
+  imu.initialize();
+  imu.setAccelRange(LSM6DS_ACCEL_RANGE_4_G); //set accel range (in gs)
+  imu.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); //set gryo range (in degrees/s)
+  imu.setAccelDataRate(LSM6DS_RATE_12_5_HZ); 
+  imu.setGyroDataRate(LSM6DS_RATE_12_5_HZ); 
+  imu.configInt1(false, false, true); // accelerometer DRDY on INT1 (dont know what these lines do)
+  imu.configInt2(false, true, false); // gyro DRDY on INT2
+  //TVC servos
+  TVCXservo.attach(TVCXpin);
+  TVCYservo.attach(TVCYpin);
+  parachute.attach(TVCPpin);
+>>>>>>> Stashed changes
 }
 
 void loop() {
