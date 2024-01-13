@@ -8,11 +8,8 @@ The program has four main steps:
 * Parachute ejection at apogee 
 
 ## Dependencies
-The software is to be run on a rocket flight computer: ```rocket_main3.0.ino```
-
-(ideally with a Teensy 4.1 microcontroller)
+The software is to be run on a rocket flight computer — ```main.cc```. An STM microcontroller (Teensy 4.1) was used during this project. 
 
 Requirements: 
-* System: Arduino IDE (2.1.0)
 * Hardware: Flight computer with CPU, IMU, barometer, and 3 servo motors 
 * Attitude estimation: https://github.com/xioTechnologies/Fusion
